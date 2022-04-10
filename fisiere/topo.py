@@ -1,67 +1,124 @@
 #!/usr/bin/python2
 
+import os
+from pathlib import Path
+import threading
 import time
+import signal
 import sys
 
-from mininet.cli import CLI
+import tests
 from mininet.log import setLogLevel
 from mininet.net import Mininet
 from mininet.topo import Topo
 from mininet.util import dumpNodeConnections
 
 import info
-import tests
+
+import os.path
+from os import path
+
+POINTS_PER_TEST = 1
 
 
-class SingleSwitchTopo(Topo):
-    "Single switch connected to n hosts."
-    def build(self, n=2):
-        switch = self.addHost('router', ip=None)
-        # Python's range(N) generates 0..N-1
-        for h in range(n):
-            host = self.addHost(info.get("host_name", h), ip=None)
-            i1 = info.get("host_if_name", h)
-            i2 = info.get("router_if_name", h)
-            self.addLink(host, switch, intfName1=i1, intfName2=i2)
+def signal_handler(signal, frame):
+    sys.exit(0)
 
 
-class NetworkManager(object):
-    def __init__(self, net, n_hosts):
+def static_arp():
+    srcp = os.path.join("src", info.ARP_TABLE)
+    return path.exists(info.ARP_TABLE) or path.exists(srcp)
+
+
+class FullTopo(Topo):
+    def build(self, nr=2, nh=2):
+        routers = []
+        for i in range(nr):
+            routers.append(self.addHost(info.get("router_name", i)))
+
+        for i in range(nr):
+            for j in range(i + 1, nr):
+                ifn = info.get("r2r_if_name", i, j)
+                self.addLink(routers[i], routers[j], intfName1=ifn,
+                             intfName2=ifn)
+
+        for i in range(nr):
+            for j in range(nh):
+                hidx = i * nh + j
+
+                host = self.addHost(info.get("host_name", hidx))
+                i1 = info.get("host_if_name", hidx)
+                i2 = info.get("router_if_name", j)
+                self.addLink(host, routers[i], intfName1=i1, intfName2=i2)
+
+
+class FullNM(object):
+    def __init__(self, net, n_routers, n_hosts):
         self.net = net
-        self.router = self.net.get("router")
         self.hosts = []
-        for i in range(n_hosts):
-            h = self.net.get(info.get("host_name", i))
-            self.hosts.append(h)
+        self.routers = []
+        self.n_hosts = n_hosts
+        for i in range(n_routers):
+            r = self.net.get(info.get("router_name", i))
+            hosts = []
+            for j in range(n_hosts):
+                hidx = i * n_hosts + j
+                h = self.net.get(info.get("host_name", hidx))
+                hosts.append(h)
+                self.hosts.append(h)
+
+            self.routers.append((r, hosts))
 
     def setup_ifaces(self):
-        for i in range(len(self.hosts)):
-            host_ip = info.get("host_ip", i)
-            host_ip6 = info.get("host_ip6", i)
-            host_llip6 = info.get("host_ip6", i)
-            h_if = info.get("host_if_name", i)
+        for i, (router, hosts) in enumerate(self.routers):
+            for j, host in enumerate(hosts):
+                hidx = i * len(hosts) + j
+                host_ip = info.get("host_ip", hidx)
+                router_ip = info.get("router_ip", hidx)
+                host_if = info.get("host_if_name", hidx)
+                router_if = info.get("router_if_name", j)
 
-            self.hosts[i].setIP(host_ip, prefixLen=24, intf=h_if)
-            self.hosts[i].cmd("ip -6 address add {}/112 dev {}".format(host_ip6, h_if))
-            self.hosts[i].cmd("ip -6 address add {}/64 dev {}".format(host_llip6, h_if))
+                router.setIP(router_ip, prefixLen=24, intf=router_if)
+                host.setIP(host_ip, prefixLen=24, intf=host_if)
+
+        nr = len(self.routers)
+        for i in range(nr):
+            for j in range(i + 1, nr):
+                ri_if = info.get("r2r_if_name", i, j)
+                rj_if = info.get("r2r_if_name", i, j)
+                ri_ip = info.get("r2r_ip1", i, j)
+                rj_ip = info.get("r2r_ip2", i, j)
+                self.routers[i][0].setIP(ri_ip, prefixLen=24, intf=ri_if)
+                self.routers[j][0].setIP(rj_ip, prefixLen=24, intf=rj_if)
 
     def setup_macs(self):
-        for i, host in enumerate(self.hosts):
-            h_mac = info.get("host_mac", i)
-            h_if = info.get("host_if_name", i)
-            host.cmd("ifconfig {} hw ether {}".format(h_if, h_mac))
+        for i, (router, hosts) in enumerate(self.routers):
+            for j, host in enumerate(hosts):
+                hidx = i * len(hosts) + j
+                h_mac = info.get("host_mac", hidx)
+                h_if = info.get("host_if_name", hidx)
+                host.cmd("ifconfig {} hw ether {}".format(h_if, h_mac))
 
-            r_mac = info.get("router_mac", i)
-            r_if = info.get("router_if_name", i)
-            self.router.cmd("ifconfig {} hw ether {}".format(r_if, r_mac))
+                r_mac = info.get("router_mac", hidx, i)
+                r_if = info.get("router_if_name", j)
+                router.cmd("ifconfig {} hw ether {}".format(r_if, r_mac))
+
+        nr = len(self.routers)
+        for i in range(nr):
+            for j in range(i + 1, nr):
+                ri_mac = info.get("r2r_mac", i, j)
+                rj_mac = info.get("r2r_mac", j, i)
+                ri_if = info.get("r2r_if_name", i, j)
+                rj_if = info.get("r2r_if_name", i, j)
+                self.routers[i][0].cmd("ifconfig {} hw ether {}".format(ri_if,
+                                                                    ri_mac))
+                self.routers[j][0].cmd("ifconfig {} hw ether {}".format(rj_if,
+                                                                    rj_mac))
 
     def disable_unneeded(self):
-        def disable_ipv6_autoconf(host):
-            host.cmd("sysctl -w net.ipv6.conf.all.autoconf=0")
-            host.cmd("sysctl -w net.ipv6.conf.all.accept_ra=0")
-
         def disable_ipv6(host):
-            host.cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+            host.cmd('sysctl -w net.ipv6.conf.all.disable_ipv6=1')
+            host.cmd('sysctl -w net.ipv6.conf.default.disable_ipv6=1')
 
         def disable_nic_checksum(host, iface):
             host.cmd('ethtool iface {} --offload rx off tx off'.format(iface))
@@ -70,116 +127,158 @@ class NetworkManager(object):
         def disable_arp(host, iface):
             host.cmd("ip link set dev {} arp off".format(iface))
 
-        disable_ipv6_autoconf(self.router)
-        disable_ipv6(self.router)
+        for i, (router, hosts) in enumerate(self.routers):
+            disable_ipv6(router)
+            for j, host in enumerate(hosts):
+                disable_ipv6(host)
+                hidx = i * len(hosts) + j
+                h_if = info.get("host_if_name", hidx)
+                disable_nic_checksum(host, h_if)
 
-        for i, host in enumerate(self.hosts):
-            h_if = info.get("host_if_name", i)
-            r_if = info.get("router_if_name", i)
-
-            disable_ipv6_autoconf(host)
-
-            disable_nic_checksum(host, h_if)
-            disable_nic_checksum(self.router, h_if)
-
-            disable_arp(host, h_if)
-            disable_arp(self.router, h_if)
-
-        # we want complete control over these actions
-        self.router.cmd('sysctl -w net.ipv4.ip_forward=0')
-        self.router.cmd('sysctl -w net.ipv4.icmp_echo_ignore_all=1')
+            # we want complete control over these actions
+            router.cmd('echo "0" > /proc/sys/net/ipv4/ip_forward')
+            router.cmd('echo "1" > /proc/sys/net/ipv4/icmp_echo_ignore_all')
+            if not static_arp():
+                for (i, (router, hosts)) in enumerate(self.routers):
+                    for j in range(len(hosts)):
+                        hidx = i * len(hosts) + j
+                        ifn = info.get("router_if_name", hidx)
+                        disable_arp(router, ifn)
 
     def add_default_routes(self):
-        for i, host in enumerate(self.hosts):
-            ip = info.get("router_ip", i)
-            ip6 = info.get("router_llip6", i)
-            h_if = info.get("host_if_name", i)
+        for i, (router, hosts) in enumerate(self.routers):
+            for j, host in enumerate(hosts):
+                hidx = i * len(hosts) + j
+                ip = info.get("router_ip", hidx)
+                host.cmd("ip route add default via {}".format(ip))
 
-            host.cmd("ip -4 route add default via {} dev {}".format(ip, h_if))
-            host.cmd("ip -6 route add default via {} dev {}".format(ip6, h_if))
-
-    def add_nei_entries(self):
-        for i, host in enumerate(self.hosts):
-            ifname = info.get("host_if_name", i)
-            ip = info.get("router_ip", i)
-            ip6 = info.get("router_llip6", i)
-            mac = info.get("router_mac", i)
-
-            host.cmd("ip -4 neigh add {} lladdr {} dev {}".format(ip, mac, ifname))
-            host.cmd("ip -6 neigh add {} lladdr {} dev {}".format(ip6, mac, ifname))
+    def add_hosts_entries(self):
+        for i, (router, hosts) in enumerate(self.routers):
+            for j, host in enumerate(hosts):
+                for h in range(len(self.hosts)):
+                    ip = info.get("host_ip", h)
+                    # FIXME entries should be added only if they aren't there.
+                    host.cmd("echo '{} h{}' >> /etc/hosts".format(ip, h))
 
     def setup(self):
         self.disable_unneeded()
         self.setup_ifaces()
         self.setup_macs()
-        self.add_nei_entries()
+        self.add_hosts_entries()
         self.add_default_routes()
 
-    def start_router(self):
-        self.router.cmd("./router > {} 2>&1 &".format(info.LOGFILE))
+    def start_routers(self):
+        ifaces = ""
+        for i in range(len(self.routers)):
+            for j in range(i + 1, len(self.routers)):
+                ifaces += "{} ".format(info.get("r2r_if_name", i, j))
+
+        for i in range(self.n_hosts):
+            ifaces += "{} ".format(info.get("router_if_name", i))
+
+        for i, (router, _) in enumerate(self.routers):
+            out = info.get("out_file", i)
+            err = info.get("err_file", i)
+            rtable = info.get("rtable", i)
+            rname = "router{}".format(i)
+            router.cmd("ln -s router {}".format(rname))
+            if not len(router.cmd("pgrep {}".format(rname))):
+                cmd = "./{} {} {} > {} 2> {} &".format(rname, rtable, ifaces,
+                                                       out, err)
+                router.cmd(cmd)
+                time.sleep(info.TIMEOUT / 2)
 
     def run_test(self, testname):
+        # restart router if dead
+        self.start_routers()
+
+        log = os.path.join(info.LOGDIR, testname)
+        Path(log).mkdir(parents=True, exist_ok=True)
+
         test = tests.TESTS[testname]
-
-        procs = {}
-        for ha in test['hosts_a']:
-            if testname == 'ping':
-                hosts = ','.join([info.get('host_ip', h) for h in test['hosts_a'] if h != ha])
-
-            elif testname == 'ping6':
-                hosts = ','.join([info.get('host_ip6', h) for h in test['hosts_a'] if h != ha])
-
-            else:
-                return
-
-            cmd = "python ./checker.py \
+        for hp in range(len(self.hosts)):
+            lout = os.path.join(log, info.get("output_file", hp))
+            lerr = os.path.join(log, info.get("error_file", hp))
+            cmd = "./checker.py \
+                    --passive \
                     --testname={} \
-                    --me={} \
-                    --hosts={}".format(testname, ha, hosts)
+                    --host={} \
+                    > {} \
+                    2> {} &".format(testname, hp, lout, lerr)
+            self.hosts[hp].cmd(cmd)
 
-            procs[ha] = self.hosts[ha].popen(cmd, shell=True)
+        time.sleep(info.TIMEOUT / 2)
+        cmd = "./checker.py \
+                --active \
+                --testname={} \
+                --host={} &".format(testname, test.host_s)
+        self.hosts[test.host_s].cmd(cmd)
 
         results = {}
-        passed = True
-        # XXX will this loop necessarily end?
-        for ha in test['hosts_a']:
-            h = self.net.get(info.get('host_name', ha))
-            p = procs[ha]
-            p.wait()
-            res = p.stdout.read().decode().strip()
-            passed = passed and (res == "PASS")
+        time.sleep(info.TIMEOUT)
+        for hp in range(len(self.hosts)):
+            lout = os.path.join(log, info.get("output_file", hp))
+            with open(lout, "r") as fin:
+                results[hp] = fin.read().strip("\r\n")
 
-        return passed
+        return results
 
-def main():
-    topo = SingleSwitchTopo(n=info.N_HOSTS)
+
+def validate_test_results(results):
+    passed = True
+    for result in results.values():
+        passed = passed and (result == "PASS")
+
+    return passed
+
+
+def should_skip(testname):
+    if static_arp():
+        return testname in {"router_arp_reply", "router_arp_request"}
+
+    return False
+
+
+def main(run_tests=False):
+    topo = FullTopo(nr=info.N_ROUTERS, nh=info.N_HOSTSEACH)
+
     net = Mininet(topo)
     net.start()
 
-    nm = NetworkManager(net, info.N_HOSTS)
+    nm = FullNM(net, info.N_ROUTERS, info.N_HOSTSEACH)
+
     nm.setup()
-    nm.start_router()
 
-    #CLI(net)
-    if nm.run_test('ping'):
-        print('ping PASSED')
+    print("{:=^80}\n".format(" Running tests "))
+    if run_tests:
+        for testname in tests.TESTS:
+            skipped = False
+
+            if should_skip(testname):
+                skipped = True
+                passed = False
+            else:
+                results = nm.run_test(testname)
+                passed = validate_test_results(results)
+            str_status = "PASSED" if passed else "FAILED"
+            if skipped:
+                str_status = "SKIPPED"
+            print("{: >20} {:.>50} {: >8}".format(testname, "", str_status))
+            time.sleep(info.TIMEOUT / 2)
 
     else:
-        print('ping FAILED')
+        net.startTerms()
+        signal.signal(signal.SIGINT, signal_handler)
+        forever = threading.Event()
+        forever.wait()
 
-    if nm.run_test('ping6'):
-        print('ping6 PASSED')
-
-    else:
-        print('ping6 FAILED')
-
-    CLI(net)
     net.stop()
 
 
-topos = { "mytopo": (lambda : SingleSwitchTopo()) }
-
 if __name__ == "__main__":
     # Tell mininet to print useful information
-    setLogLevel("info")
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "tests":
+        main(run_tests=True)
+    else:
+        setLogLevel("info")
+        main()

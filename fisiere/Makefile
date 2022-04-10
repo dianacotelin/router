@@ -1,13 +1,11 @@
 PROJECT=router
-SOURCES=router.c skel.c
+SOURCES=router.c queue.c list.c skel.c
 LIBRARY=nope
-INCPATHS=.
+INCPATHS=include
 LIBPATHS=.
 LDFLAGS=
 CFLAGS=-c -Wall
 CC=gcc
-
-# ------------ MAGIC BEGINS HERE -------------
 
 # Automatic generation of some important lists
 OBJECTS=$(SOURCES:.c=.o)
@@ -25,6 +23,9 @@ $(BINARY): $(OBJECTS)
 .c.o:
 	$(CC) $(INCFLAGS) $(CFLAGS) -fPIC $< -o $@
 
+distclean: clean
+	rm -f $(BINARY)
+
 clean:
-	rm -f $(OBJECTS) $(BINARY)
+	rm -f $(OBJECTS)
 
