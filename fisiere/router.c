@@ -13,31 +13,26 @@ int arptable_len;
 
 void arp_reply(packet m, struct ether_header *eth_hdr, struct ether_arp *arp_hdr, int interface) {
 	
-	struct ether_arp *arp_hdr0 = (struct ether_header *)(m.payload + sizeof(struct ether_header));
-	struct ether_header *eth_hdr0 = (struct ether_hrader *)m.payload;
+	struct arp_header arp_hdr0;
 	uint8_t *aux = malloc(6*sizeof(uint8_t));
 	get_interface_mac(interface, aux);
 
-	memcpy(eth_hdr0->ether_shost, aux, ETH_ALEN);
-	memcpy(eth_hdr0->ether_dhost, eth_hdr->ether_shost, ETH_ALEN);
-
-	eth_hdr0->ether_type = htons(0x806);
-	arp_hdr0->arp_hrd = htons(ARPHRD_ETHER);
-	arp_hdr0->arp_pro = htons(ETHERTYPE_IP);
-	arp_hdr0->arp_hln = 6;
-	arp_hdr0->arp_pln = 4;
-	arp_hdr0->arp_op = htons(ARPOP_REPLY);
-	memcpy(arp_hdr0->arp_sha, eth_hdr->ether_shost, 6);
-	memcpy(arp_hdr0->arp_tha, eth_hdr->ether_dhost, 6);
-	memcpy(arp_hdr0->arp_spa, arp_hdr->arp_tpa, 4);
-	memcpy(arp_hdr0->arp_tpa, arp_hdr->arp_spa, 4);
+	arp_hdr0.htype = htons(ARPHRD_ETHER);
+	arp_hdr0.ptype = htons(2048);
+	arp_hdr0.hlen = 6;
+	arp_hdr0.plen = 4;
+	arp_hdr0.op = htons(ARPOP_REPLY);
+	memcpy(arp_hdr0.sha, eth_hdr->ether_shost, 6);
+	memcpy(arp_hdr0.tha, eth_hdr->ether_dhost, 6);
+	arp_hdr0.spa = arp_hdr->arp_tpa;
+	arp_hdr0.tpa = arp_hdr->arp_spa;
 
 	packet pack;
-	pack.len = sizeof(struct ether_header) + sizeof(struct ether_arp);
+	pack.len = sizeof(struct arp_header) + sizeof(struct ether_arp);
 	pack.interface = interface;
-	memset(pack.payload, 0, 1600);
+
 	memcpy(pack.payload, eth_hdr, sizeof(struct ether_header));
-	memcpy(pack.payload + sizeof(struct ether_header), arp_hdr0, sizeof(struct ether_arp));
+	memcpy(pack.payload + sizeof(struct ether_header), &arp_hdr0, sizeof(struct arp_header));
 	send_packet(&pack);
 
 }
@@ -126,7 +121,6 @@ int main(int argc, char *argv[])
 	printf("Asa sunt zilele mele\n");
 	packet m;
 	int rc;
-	//FILE *file = fopen(argv[1], "r");
 	// Do not modify this line
 	init(argc - 2, argv + 2);
 	printf("Una buna 10 rele\n");
@@ -137,7 +131,7 @@ int main(int argc, char *argv[])
 	printf("Nu da doamne cineva\n");
 
 	rtable_len = read_rtable(argv[1], rtable);
-	arptable_len = parse_arp_table("arp_table.txt", arp_table);
+	//arptable_len = parse_arp_table("arp_table.txt", arp_table);
 	printf("Sa ma scape de lumea rea\n");
 	qsort(rtable, rtable_len, sizeof(struct route_table_entry), comp_func);
 	printf("Of lume rea blestemata esti\n");
@@ -155,12 +149,9 @@ int main(int argc, char *argv[])
 			printf("Am intrat aici2\n");
 			if (icmp_hdr != NULL) {
 				if ((icmp_hdr->type == ICMP_ECHO) && (ip_hdr->daddr == inet_addr)) {
-
+					
 				}
 			}
-
-
-
 
 			if (ip_checksum( (void*)ip_hdr, sizeof(struct iphdr)) != 0)
 				continue;
@@ -175,7 +166,7 @@ int main(int argc, char *argv[])
 
 			struct route_table_entry *best_route = get_best_route(ip_hdr->daddr);
 			if (best_route == NULL) {
-				printf("Am intrat aici 3\n");
+				
 				continue;
 			}
 			struct arp_entry *arp_ent = get_arp_entry(arp_table, arptable_len, best_route->next_hop);
@@ -189,24 +180,20 @@ int main(int argc, char *argv[])
 				
 			} 
 			
+		} else 
+			if (ntohs(eth_hdr->ether_type) == 0x806) {
+				if (arp_hdr != NULL) {
+					if (ntohs(arp_hdr->arp_op) == ARPOP_REQUEST) {
+						memcpy(eth_hdr->ether_dhost, eth_hdr->ether_shost, 6);
+						get_interface_mac(m.interface, eth_hdr->ether_shost);
+						arp_reply(m, eth_hdr, arp_hdr, m.interface);
+						continue;
+					}
+					if (ntohs(arp_hdr->arp_op) == ARPOP_REPLY) {
+
+					}
+				}
 		}
-		
-		
-		//memcpy(eth_hdr->ether_dhost, arp_ent, 6);
-		//get_interface_mac(b_route->interface, eth_hdr->ether_shost);
-		//send_packet(&m);
-		
-
-		// if (ntohs(eth_hdr->ether_type) == 0x806) {
-		// 	if (ntohs(arp_hdr->arp_op) == ARPOP_REQUEST) {
-		// 		arp_reply(m, eth_hdr, arp_hdr, m.interface);
-		// 	}
-		// 	if (ntohs(arp_hdr->arp_op) == ARPOP_REPLY) {
-
-		// 	}
-		// }
-		//send_packet(&m);
 		
 	}
 }
-
