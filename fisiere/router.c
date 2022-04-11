@@ -1,6 +1,7 @@
 #include "queue.h"
 #include "skel.h"
 #include <netinet/if_ether.h>
+#include <netinet/ip_icmp.h>
 
 struct route_table_entry *rtable;
 struct arp_entry *arp_table;
@@ -60,48 +61,29 @@ struct rtable_entry *get_best_route2(__u32 dest_ip, struct route_table_entry *rt
         return &rtable[idx];
 }
 
-struct route_table_entry *get_best_route3(__u32 dest_ip, struct route_table_entry *rtable) { 
-	int l = 0;
-	int r = rtable_len - 1;
 
-	while (l <= r) {
-		int mid = l + (r - l) / 2;
-		if ((dest_ip & rtable[mid].mask) == rtable[mid].prefix) {
-			return (&rtable[mid]);
-		}
-		if ((dest_ip & rtable[mid].mask) > rtable[mid].prefix) {
-			l = mid + 1;
-		}
-		if ((dest_ip & rtable[mid].mask) == rtable[mid].prefix) {
-			r = mid - 1;
-		}
-	}
-	return NULL;
-
-}
-
-int binarySearch(int left, int right, __u32 dest, struct route_table_entry *table) {
-    if (left <= right) {
-        if (table[(left + right)/2].prefix == (table[(left + right)/2].mask & dest))
-            return (left + right)/2;
-        else if (table[(left + right)/2].prefix >(table[(left + right)/2].mask & dest))
-            binarySearch(left, (left + right)/2 - 1, dest, table);
+int binarySearch(int l, int r, __u32 dest) {
+    if (l <= r) {
+		int mid = (l + r) / 2;
+        if (rtable[mid].prefix == (rtable[mid].mask & dest))
+            return mid;
+        else if (rtable[mid].prefix >(rtable[mid].mask & dest))
+            binarySearch(l, mid - 1, dest);
         else
-            binarySearch((left + right)/2 + 1, right, dest, table);
+            binarySearch(mid + 1, r, dest);
     }
     return -1;
 }
 
-//functia de cautare a routei cea mai bune
-struct route_table_entry *get_best_route(__u32 dest, int dim, struct route_table_entry *table) {
+struct route_table_entry *get_best_route(__u32 dest) {
     struct route_table_entry *best = NULL;
-	//  get_best_route realizeaza o cautare in timp O(logn)
-	int idx = binarySearch(0, dim, dest, table);
-	for (int i = idx; i < dim; i++){
-		int x = dest & table[i].mask;
-		if(x == table[i].prefix){
-			if(best == NULL || (best->mask < table[i].mask))
-				best = &table[i];
+	
+	int idx = binarySearch(0, rtable_len, dest);
+	for (int i = idx; i < rtable_len; i++){
+		int aux = dest & rtable[i].mask;
+		if(aux == rtable[i].prefix){
+			if(best == NULL || (best->mask < rtable[i].mask))
+				best = &rtable[i];
 		}
 	}
     return best;
@@ -109,13 +91,25 @@ struct route_table_entry *get_best_route(__u32 dest, int dim, struct route_table
 
 
 int comp_func(const void *a, const void *b) {
-	uint32_t pref_a = ((struct route_table_entry *)a)->prefix;
-	uint32_t pref_b = ((struct route_table_entry *)b)->prefix;
-	if(pref_a == pref_b)
-		return (int)(((struct route_table_entry *)a)->mask - ((struct route_table_entry *)b)->mask);
-	else
-		return (pref_a - pref_b);
-}
+ 	uint32_t pref_a = ((struct route_table_entry *)a)->prefix;
+ 	uint32_t pref_b = ((struct route_table_entry *)b)->prefix;
+	int aux = 0;
+ 	if(pref_a == pref_b) {
+		aux = (int)(((struct route_table_entry *)a)->mask - ((struct route_table_entry *)b)->mask);
+	} else {
+ 		aux = pref_a - pref_b;
+	}
+	return aux;
+ }
+// int comp_func(const void *a, const void *b) {
+// 	struct route_table_entry *r1 = (struct route_table_entry *)a;
+// 	struct route_table_entry *r2 = (struct route_table_entry *)b;
+// 	if (r1->prefix == r2->prefix) {
+// 		return (int)r2->mask - r1->mask;
+// 	} else {
+// 		return (int)r1->prefix - r2->prefix;
+// 	}
+// }
 struct arp_entry *get_arp_entry(struct arp_entry *arp_tab, int arptable_size, uint32_t ip) {
 
 	for (int i = 0; i < arptable_size; i++) {
@@ -141,8 +135,6 @@ int main(int argc, char *argv[])
 	rtable = malloc(sizeof(struct route_table_entry) * 1000000);
 	arp_table = malloc(sizeof(struct arp_entry ) * 10000000);
 	printf("Nu da doamne cineva\n");
-	//DIE(rtable == NULL, "memory");
-	//DIE(rtable == NULL, "memory2");
 
 	rtable_len = read_rtable(argv[1], rtable);
 	arptable_len = parse_arp_table("arp_table.txt", arp_table);
@@ -154,13 +146,22 @@ int main(int argc, char *argv[])
 		DIE(rc < 0, "get_packet");
 		
 		struct ether_header *eth_hdr = (struct ether_header *)m.payload;
-		//struct arp_header *arp = parse_arp_table("arp_table.txt", arp_table);
 		struct ether_arp *arp_hdr = (struct ether_arp*)(m.payload + sizeof(struct ether_header));
 		struct iphdr *ip_hdr = (struct iphdr *)(m.payload + sizeof(struct ether_header));
 		printf("Am intrat aici4\n");
+		struct icmphdr *icmp_hdr = (struct icmphdr *)(m.payload + sizeof(struct ether_header) + sizeof(struct iphdr));
 
 		if (eth_hdr->ether_type == htons(0x800)) {
 			printf("Am intrat aici2\n");
+			if (icmp_hdr != NULL) {
+				if ((icmp_hdr->type == ICMP_ECHO) && (ip_hdr->daddr == inet_addr)) {
+
+				}
+			}
+
+
+
+
 			if (ip_checksum( (void*)ip_hdr, sizeof(struct iphdr)) != 0)
 				continue;
 
@@ -172,7 +173,7 @@ int main(int argc, char *argv[])
 			ip_hdr->check = 0;
 			ip_hdr->check = ip_checksum((void*)ip_hdr, sizeof(struct iphdr));
 
-			struct route_table_entry *best_route = get_best_route(ip_hdr->daddr,rtable_len, rtable);
+			struct route_table_entry *best_route = get_best_route(ip_hdr->daddr);
 			if (best_route == NULL) {
 				printf("Am intrat aici 3\n");
 				continue;
@@ -208,3 +209,4 @@ int main(int argc, char *argv[])
 		
 	}
 }
+
