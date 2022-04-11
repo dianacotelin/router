@@ -14,8 +14,6 @@ int arptable_len;
 void arp_reply(packet m, struct ether_header *eth_hdr, struct ether_arp *arp_hdr, int interface) {
 	
 	struct arp_header arp_hdr0;
-	uint8_t *aux = malloc(6*sizeof(uint8_t));
-	get_interface_mac(interface, aux);
 
 	arp_hdr0.htype = htons(ARPHRD_ETHER);
 	arp_hdr0.ptype = htons(2048);
@@ -26,6 +24,30 @@ void arp_reply(packet m, struct ether_header *eth_hdr, struct ether_arp *arp_hdr
 	memcpy(arp_hdr0.tha, eth_hdr->ether_dhost, 6);
 	arp_hdr0.spa = arp_hdr->arp_tpa;
 	arp_hdr0.tpa = arp_hdr->arp_spa;
+
+	packet pack;
+	pack.len = sizeof(struct arp_header) + sizeof(struct ether_arp);
+	pack.interface = interface;
+
+	memcpy(pack.payload, eth_hdr, sizeof(struct ether_header));
+	memcpy(pack.payload + sizeof(struct ether_header), &arp_hdr0, sizeof(struct arp_header));
+	send_packet(&pack);
+
+}
+
+void arp_reply2(packet m, struct ether_header *eth_hdr, uint32_t s_addr, uint32_t d_addr, int interface) {
+	
+	struct arp_header arp_hdr0;
+
+	arp_hdr0.htype = htons(ARPHRD_ETHER);
+	arp_hdr0.ptype = htons(2048);
+	arp_hdr0.hlen = 6;
+	arp_hdr0.plen = 4;
+	arp_hdr0.op = htons(ARPOP_REPLY);
+	memcpy(arp_hdr0.sha, eth_hdr->ether_shost, 6);
+	memcpy(arp_hdr0.tha, eth_hdr->ether_dhost, 6);
+	arp_hdr0.spa = s_addr;
+	arp_hdr0.tpa = d_addr;
 
 	packet pack;
 	pack.len = sizeof(struct arp_header) + sizeof(struct ether_arp);
@@ -178,6 +200,14 @@ int main(int argc, char *argv[])
 				m.interface = best_route->interface;
 				send_packet(&m);
 				
+			} else {
+				packet pack = m;
+				pack.interface = best_route->interface;
+				eth_hdr->ether_type = htons(ETHERTYPE_ARP);
+				memset(eth_hdr->ether_dhost, 0xff, 6);
+				arp_reply2(m, eth_hdr, best_route->next_hop, inet_addr, best_route->interface);
+				queue_enq(q, &pack);
+				continue;
 			} 
 			
 		} else 
@@ -190,7 +220,18 @@ int main(int argc, char *argv[])
 						continue;
 					}
 					if (ntohs(arp_hdr->arp_op) == ARPOP_REPLY) {
+						arp_table[arptable_len].ip = arp_hdr->arp_spa;
+						arptable_len++;
 
+						while (!queue_empty(q)) {
+							packet *last = queue_deq(q);
+							get_interface_mac(last->interface, eth_hdr->ether_shost);
+							memcpy(eth_hdr->ether_dhost, eth_hdr->ether_shost, 6);
+							send_packet(last);
+							free(last);
+							
+						}
+						continue;
 					}
 				}
 		}
