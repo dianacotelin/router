@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
 
 				arp_hdr0.hlen = 6;
 				arp_hdr0.plen = 4;
-				arp_hdr0.op = htons(ARPOP_REPLY);
+				arp_hdr0.op = htons(ARPOP_REQUEST);
 				memcpy(arp_hdr0.sha, eth_hdr->ether_shost, 6);
 				memcpy(arp_hdr0.tha, eth_hdr->ether_dhost, 6);
 				arp_hdr0.spa = inet_addr(get_interface_ip(best_route->interface));
@@ -234,40 +234,34 @@ int main(int argc, char *argv[])
 			
 		} else {
 			if (ntohs(eth_hdr->ether_type) == 0x806) {
-				printf("aici da");
-					if (ntohs(arp_hdr->op) == ARPOP_REQUEST) {
-						memcpy(eth_hdr->ether_dhost, eth_hdr->ether_shost, 6);
-						get_interface_mac(m.interface, eth_hdr->ether_shost);
-						arp_reply(m, eth_hdr, arp_hdr, m.interface);
-						continue;
+				printf("ARP\n");
+				if ((arp_hdr->op) == htons(ARPOP_REPLY)) {
+					printf("REPLY\n");
+					arp_table[arptable_len].ip = arp_hdr->spa;
+					for (int i = 0; i < 6; i++) {
+						arp_table[arptable_len].mac[i] = arp_hdr->sha[i];
 					}
-					if ((arp_hdr->op) == htons(ARPOP_REPLY)) {
-						printf("hei buna");
-						arp_table[arptable_len].ip = arp_hdr->spa;
-						for (int i = 0; i < 6; i++) {
-							arp_table[arptable_len].mac[i] = arp_hdr->sha[i];
-						}
 						//memcpy(arp_table[arptable_len].mac, eth_hdr->ether_shost, ETH_ALEN);
-						arptable_len++;
-						queue aux = queue_create();
+					arptable_len++;
+					queue aux = queue_create();
 
-						while (!queue_empty(q)) {
-							printf("am intrat aiiiici\n");
-							packet *last = queue_deq(q);
-							struct ether_header *eth_hdr0 = (struct ether_header *)last->payload;
+					while (!queue_empty(q)) {
+						printf("while\n");
+						packet *last = queue_deq(q);
+						struct ether_header *eth_hdr0 = (struct ether_header *)last->payload;
 							//struct ether_arp *arp_hdr0 = (struct ether_arp*)(last->payload + sizeof(struct ether_header));
-							struct iphdr *ip_hdr0 = (struct iphdr *)(last->payload + sizeof(struct ether_header));
-							struct route_table_entry *best_r = get_best_route(ip_hdr0->daddr);
-							struct arp_entry *arp_ent0 = get_arp_entry(arp_table, arptable_len, best_r->next_hop);
-							if (arp_ent0 == NULL) {
-								queue_enq(aux, last);
-								continue;
-							}
-							memcpy(eth_hdr0->ether_dhost, eth_hdr0->ether_shost, 6);
+						struct iphdr *ip_hdr0 = (struct iphdr *)(last->payload + sizeof(struct ether_header));
+						struct route_table_entry *best_r = get_best_route(ip_hdr0->daddr);
+						struct arp_entry *arp_ent0 = get_arp_entry(arp_table, arptable_len, best_r->next_hop);
+						if (arp_ent0 == NULL) {
+							queue_enq(aux, last);
+							continue;
+						}
+						memcpy(eth_hdr0->ether_dhost, eth_hdr0->ether_shost, 6);
 							get_interface_mac(last->interface, eth_hdr0->ether_shost);
 							//last->interface = best_r->interface;
-							send_packet(last);
-							printf("trimis");
+						send_packet(last);
+						printf("trimis");
 							//free(last);
 							// if ((ip_hdr0 != NULL) && (ip_hdr0->daddr == arp_hdr->arp_spa)) {
 							// 	get_interface_mac(last->interface, eth_hdr->ether_shost);
@@ -277,10 +271,17 @@ int main(int argc, char *argv[])
 							// 	free(last);
 							// }
 							
-						}
-						q = aux;
-					
 					}
+					q = aux;
+					
+				}
+				if (ntohs(arp_hdr->op) == ARPOP_REQUEST) {
+					printf("REQUEST\n");
+					memcpy(eth_hdr->ether_dhost, eth_hdr->ether_shost, 6);
+					get_interface_mac(m.interface, eth_hdr->ether_shost);
+					arp_reply(m, eth_hdr, arp_hdr, m.interface);
+					//continue;
+				}
 			}
 		}
 		
