@@ -81,7 +81,7 @@ struct rtable_entry *get_best_route2(__u32 dest_ip, struct route_table_entry *rt
 
 int binarySearch(int l, int r, __u32 dest) {
     if (l <= r) {
-		int mid = (l + r) / 2;
+		int mid = (r+l) / 2;
         if (rtable[mid].prefix == (rtable[mid].mask & dest))
             return mid;
         else if (rtable[mid].prefix >(rtable[mid].mask & dest))
@@ -96,13 +96,20 @@ struct route_table_entry *get_best_route(__u32 dest) {
     struct route_table_entry *best = NULL;
 	
 	int idx = binarySearch(0, rtable_len, dest);
+	
+	
+	
+
 	for (int i = idx; i < rtable_len; i++){
 		int aux = dest & rtable[i].mask;
 		if(aux == rtable[i].prefix){
-			if(best == NULL || (best->mask < rtable[i].mask))
+			if(best == NULL || (best->mask < rtable[i].mask)){
 				best = &rtable[i];
-		}
+				
+			}
+		} 
 	}
+	
     return best;
 }
 
@@ -110,9 +117,11 @@ struct route_table_entry *get_best_route(__u32 dest) {
 int comp_func(const void *a, const void *b) {
  	uint32_t pref_a = ((struct route_table_entry *)a)->prefix;
  	uint32_t pref_b = ((struct route_table_entry *)b)->prefix;
+	uint32_t mask_a = ((struct route_table_entry *)a)->mask;
+	uint32_t mask_b = ((struct route_table_entry *)b)->mask;
 	int aux = 0;
- 	if(pref_a == pref_b) {
-		aux = (int)(((struct route_table_entry *)a)->mask - ((struct route_table_entry *)b)->mask);
+ 	if(pref_a != pref_b) {
+		aux = mask_a - mask_b;
 	} else {
  		aux = pref_a - pref_b;
 	}
@@ -234,9 +243,7 @@ int main(int argc, char *argv[])
 			
 		} else {
 			if (ntohs(eth_hdr->ether_type) == 0x806) {
-				printf("ARP\n");
 				if ((arp_hdr->op) == htons(ARPOP_REPLY)) {
-					printf("REPLY\n");
 					arp_table[arptable_len].ip = arp_hdr->spa;
 					for (int i = 0; i < 6; i++) {
 						arp_table[arptable_len].mac[i] = arp_hdr->sha[i];
@@ -246,7 +253,6 @@ int main(int argc, char *argv[])
 					queue aux = queue_create();
 
 					while (!queue_empty(q)) {
-						printf("while\n");
 						packet *last = queue_deq(q);
 						struct ether_header *eth_hdr0 = (struct ether_header *)last->payload;
 							//struct ether_arp *arp_hdr0 = (struct ether_arp*)(last->payload + sizeof(struct ether_header));
@@ -261,7 +267,6 @@ int main(int argc, char *argv[])
 							get_interface_mac(last->interface, eth_hdr0->ether_shost);
 							//last->interface = best_r->interface;
 						send_packet(last);
-						printf("trimis");
 							//free(last);
 							// if ((ip_hdr0 != NULL) && (ip_hdr0->daddr == arp_hdr->arp_spa)) {
 							// 	get_interface_mac(last->interface, eth_hdr->ether_shost);
