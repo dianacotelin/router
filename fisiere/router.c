@@ -10,7 +10,7 @@ int rtable_len;
 int arptable_len;
 
 
-// Functie folosita pentru a raspunde la cererea de arp request
+// Functie folosita pentru a raspunde la cererea arp request
 void arp_reply(packet m, struct ether_header *eth_hdr, struct arp_header *arp_hdr, int interface) {
 	
 	struct arp_header arp_hdr0;
